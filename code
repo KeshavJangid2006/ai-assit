@@ -1,0 +1,212 @@
+import speech_recognition as sr
+import pyttsx3
+import datetime
+import webbrowser
+import random
+import os
+import google.generativeai as genai
+
+# ── Configure Gemini ──────────────────────────────────────────────────────────
+GEMINI_API_KEY = "GEMINI API KEY"   #  replace with your key
+genai.configure(api_key=GEMINI_API_KEY)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class AIAssistant:
+    def __init__(self, name="jarvis"):
+        self.name = name
+        self.recognizer = sr.Recognizer()
+        self.engine = pyttsx3.init()
+
+        # Voice settings
+        voices = self.engine.getProperty("voices")
+        if voices:
+            self.engine.setProperty("voice", voices[0].id)
+        self.engine.setProperty("rate", 170)
+        self.engine.setProperty("volume", 1.0)
+
+        # Gemini model + persistent chat session
+        self.gemini_model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            system_instruction=(
+                f"You are {self.name}, a helpful voice AI assistant. "
+                "Keep your answers concise and conversational — two or three "
+                "sentences at most — because your responses will be spoken aloud."
+            ),
+        )
+        self.chat_session = self.gemini_model.start_chat(history=[])
+
+        self.jokes = [
+            "Why do programmers prefer dark mode? Because light attracts bugs.",
+            "Why did the computer go to therapy? Because it had too many bytes of trauma.",
+            "Why was the Python developer calm? Because he handled every exception.",
+            "Why did the laptop stay cold? Because it left its Windows open.",
+        ]
+
+    # ── Speech helpers ────────────────────────────────────────────────────────
+
+    def speak(self, text):
+        print(f"{self.name}: {text}")
+        self.engine.say(text)
+        self.engine.runAndWait()
+
+    def listen(self):
+        with sr.Microphone() as source:
+            print("Listening...")
+            self.recognizer.adjust_for_ambient_noise(source, duration=1)
+            audio = self.recognizer.listen(source)
+
+        try:
+            print("Recognizing...")
+            command = self.recognizer.recognize_google(audio)
+            print(f"You said: {command}")
+            return command.lower()
+        except sr.UnknownValueError:
+            return ""
+        except sr.RequestError:
+            self.speak("Speech service is not available right now.")
+            return ""
+
+    # ── Gemini AI fallback ────────────────────────────────────────────────────
+
+    def ask_gemini(self, query):
+        """Send an unrecognised command to Gemini and speak the reply."""
+        try:
+            self.speak("Let me think about that…")
+            response = self.chat_session.send_message(query)
+            answer = response.text.strip()
+            self.speak(answer)
+        except Exception as e:
+            self.speak("Sorry, I could not reach Gemini right now.")
+            print(f"Gemini error: {e}")
+
+    # ── Built-in commands ─────────────────────────────────────────────────────
+
+    def greet(self):
+        hour = datetime.datetime.now().hour
+        if 5 <= hour < 12:
+            greeting = "Good morning"
+        elif 12 <= hour < 18:
+            greeting = "Good afternoon"
+        else:
+            greeting = "Good evening"
+        self.speak(f"{greeting}! I am {self.name}, your AI assistant. How can I help you?")
+
+    def tell_time(self):
+        current_time = datetime.datetime.now().strftime("%I:%M %p")
+        self.speak(f"The time is {current_time}")
+
+    def tell_date(self):
+        today = datetime.datetime.now().strftime("%d %B %Y")
+        self.speak(f"Today's date is {today}")
+
+    def open_website(self, site_name):
+        websites = {
+            "youtube": "https://www.youtube.com",
+            "google": "https://www.google.com",
+            "github": "https://www.github.com",
+            "gmail": "https://mail.google.com",
+            "chatgpt": "https://chat.openai.com",
+            "spotify": "https://www.spotify.com",
+            "chrome": "https://www.google.com/chrome",
+        }
+        if site_name in websites:
+            self.speak(f"Opening {site_name}")
+            webbrowser.open(websites[site_name])
+        else:
+            self.speak("I don't know that website yet.")
+
+    def search_google(self, query):
+        self.speak(f"Searching Google for {query}")
+        webbrowser.open(f"https://www.google.com/search?q={query}")
+
+    def tell_joke(self):
+        self.speak(random.choice(self.jokes))
+
+    def open_notepad(self):
+        try:
+            if os.name == "nt":
+                os.system("notepad")
+                self.speak("Opening Notepad")
+            else:
+                self.speak("Notepad opening is currently set for Windows only.")
+        except Exception as e:
+            self.speak("Sorry, I could not open Notepad.")
+            print(e)
+
+    # ── Command router ────────────────────────────────────────────────────────
+
+    def handle_command(self, command):
+        if not command:
+            self.speak("I didn't catch that. Please say it again.")
+            return True
+
+        if "time" in command:
+            self.tell_time()
+
+        elif "date" in command:
+            self.tell_date()
+
+        elif "open youtube" in command:
+            self.open_website("youtube")
+
+        elif "open google" in command:
+            self.open_website("google")
+
+        elif "open github" in command:
+            self.open_website("github")
+
+        elif "open gmail" in command:
+            self.open_website("gmail")
+
+        elif "open chatgpt" in command:
+            self.open_website("chatgpt")
+
+        elif "open spotify" in command:
+            self.open_website("spotify")
+
+        elif "open chrome" in command:
+            self.open_website("chrome")
+
+        elif "search" in command:
+            query = command.replace("search", "").strip()
+            if query:
+                self.search_google(query)
+            else:
+                self.speak("What should I search for?")
+
+        elif "joke" in command:
+            self.tell_joke()
+
+        elif "open notepad" in command:
+            self.open_notepad()
+
+        elif "your name" in command:
+            self.speak(f"My name is {self.name}")
+
+        elif "hello" in command or "hi" in command:
+            self.speak("Hello! How can I help you?")
+
+        elif "exit" in command or "stop" in command or "bye" in command:
+            self.speak("Goodbye! Have a great day.")
+            return False
+
+        else:
+            # ── Gemini handles anything Jarvis doesn't recognise ──
+            self.ask_gemini(command)
+
+        return True
+
+    # ── Main loop ─────────────────────────────────────────────────────────────
+
+    def run(self):
+        self.greet()
+        running = True
+        while running:
+            command = self.listen()
+            running = self.handle_command(command)
+
+
+if __name__ == "__main__":
+    assistant = AIAssistant(name="keshav" )
+    assistant.run()
